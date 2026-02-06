@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from .database import SessionLocal
-from db.models import Tecnico, OS, Atendimento
-from .auth import verify_password, create_token, decode_token
 from datetime import datetime
+
+from app.database import SessionLocal
+from app.db.models import Tecnico, OS, Atendimento, StatusOS
+from app.auth import verify_password, create_token, decode_token
+
 
 router = APIRouter()
 
 # ======================
 # DB Dependency
 # ======================
-
 def get_db():
     db = SessionLocal()
     try:
@@ -21,10 +22,12 @@ def get_db():
 # ======================
 # Auth Dependency
 # ======================
-
-def get_current_user(authorization: str = Header(...), db: Session = Depends(get_db)):
+def get_current_user(
+    authorization: str = Header(...),
+    db: Session = Depends(get_db)
+):
     if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Token ausente")
+        raise HTTPException(status_code=401, detail="Token ausente")
 
     token = authorization.replace("Bearer ", "")
     user_id = decode_token(token)
@@ -32,7 +35,7 @@ def get_current_user(authorization: str = Header(...), db: Session = Depends(get
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
 
-    user = db.query(Tecnico).get(user_id)
+    user = db.get(Tecnico, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="Usuário não existe")
 
@@ -41,7 +44,6 @@ def get_current_user(authorization: str = Header(...), db: Session = Depends(get
 # ======================
 # Login
 # ======================
-
 @router.post("/login")
 def login(email: str, senha: str, db: Session = Depends(get_db)):
     user = db.query(Tecnico).filter(Tecnico.email == email).first()
@@ -54,30 +56,33 @@ def login(email: str, senha: str, db: Session = Depends(get_db)):
 # ======================
 # OS
 # ======================
-
 @router.get("/os/abertas")
-def listar_os(user: Tecnico = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(OS).filter(OS.status == "EM_ABERTO").all()
-
+def listar_os(
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(OS).filter(OS.status == StatusOS.EM_ABERTO).all()
 
 @router.post("/os/{os_id}/iniciar")
-def iniciar_atendimento(os_id: int, user: Tecnico = Depends(get_current_user), db: Session = Depends(get_db)):
+def iniciar_atendimento(
+    os_id: int,
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    os = db.get(OS, os_id)
 
-    os = db.query(OS).get(os_id)
-
-    if not os or os.status != "EM_ABERTO":
+    if not os or os.status != StatusOS.EM_ABERTO:
         raise HTTPException(400, "OS indisponível")
 
-    # Técnico já está atendendo?
     ativo = db.query(Atendimento).filter(
         Atendimento.tecnico_id == user.id,
-        Atendimento.hora_fim == None
+        Atendimento.hora_fim.is_(None)
     ).first()
 
     if ativo:
         raise HTTPException(400, "Você já está em atendimento")
 
-    os.status = "EM_ATENDIMENTO"
+    os.status = StatusOS.EM_ATENDIMENTO
     os.tecnico_id = user.id
 
     atendimento = Atendimento(
@@ -90,19 +95,24 @@ def iniciar_atendimento(os_id: int, user: Tecnico = Depends(get_current_user), d
     db.commit()
     db.refresh(atendimento)
 
-    return {"message": "Atendimento iniciado", "atendimento_id": atendimento.id}
-
+    return {
+        "message": "Atendimento iniciado",
+        "atendimento_id": atendimento.id
+    }
 
 @router.post("/atendimento/{id}/finalizar")
-def finalizar_atendimento(id: int, user: Tecnico = Depends(get_current_user), db: Session = Depends(get_db)):
-
-    atendimento = db.query(Atendimento).get(id)
+def finalizar_atendimento(
+    id: int,
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    atendimento = db.get(Atendimento, id)
 
     if not atendimento or atendimento.tecnico_id != user.id:
         raise HTTPException(403, "Acesso negado")
 
     atendimento.hora_fim = datetime.utcnow()
-    atendimento.os.status = "CONCLUIDA"
+    atendimento.os.status = StatusOS.CONCLUIDA
 
     db.commit()
 
