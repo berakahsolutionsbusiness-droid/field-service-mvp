@@ -63,6 +63,8 @@ def listar_os(
 ):
     return db.query(OS).filter(OS.status == StatusOS.EM_ABERTO).all()
 
+
+
 @router.post("/os/{os_id}/iniciar")
 def iniciar_atendimento(
     os_id: int,

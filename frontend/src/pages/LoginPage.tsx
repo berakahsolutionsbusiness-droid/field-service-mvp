@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { login } from "../services/api";
 
-export default function LoginPage() {
+export default function LoginPage({ onLogin }: any) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [status, setStatus] = useState("");
@@ -12,9 +12,12 @@ export default function LoginPage() {
 
       const data = await login(email, senha);
 
+      localStorage.setItem("token", data.token);
+
       setStatus("✅ Login OK");
-      console.log("TOKEN:", data.token);
-    } catch (err) {
+
+      onLogin();
+    } catch {
       setStatus("❌ Falha no login");
     }
   }
@@ -32,8 +35,8 @@ export default function LoginPage() {
       <br /><br />
 
       <input
-        placeholder="Senha"
         type="password"
+        placeholder="Senha"
         value={senha}
         onChange={(e) => setSenha(e.target.value)}
       />
