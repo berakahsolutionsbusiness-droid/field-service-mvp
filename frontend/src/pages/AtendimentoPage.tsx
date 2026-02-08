@@ -9,22 +9,27 @@ export default function AtendimentoPage() {
   const [descricao, setDescricao] = useState("");
   const [status, setStatus] = useState("");
 
-async function finalizar() {
-  if (!id) return;
+  async function finalizar() {
+    try {
+      setStatus("Finalizando...");
 
-  try {
-    setStatus("Finalizando...");
+      const dados = {
+        observacao: descricao,
+        latitude: -23.55, // mock GPS
+        longitude: -46.63,
+        foto: "base64_fake_imagem",
+      };
 
-    await finalizarAtendimento(Number(id));
+      await finalizarAtendimento(Number(id), dados);
 
-    alert("Atendimento concluído!");
+      alert("Atendimento concluído!");
 
-    navigate("/tecnico");
-  } catch {
-    setStatus("Erro ao finalizar");
+      navigate("/tecnico");
+    } catch (err) {
+      console.error(err);
+      setStatus("Erro ao finalizar");
+    }
   }
-}
-
 
   return (
     <div style={{ padding: 40 }}>

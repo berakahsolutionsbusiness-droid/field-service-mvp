@@ -1,8 +1,22 @@
 const API = "http://127.0.0.1:8000/api";
 
-//
+// =====================
+// AUTH HEADER
+// =====================
+
+function getAuthHeader() {
+  const token = localStorage.getItem("token");
+
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+// =====================
 // LOGIN
-//
+// =====================
+
 export async function login(email: string, senha: string) {
   const res = await fetch(
     `${API}/login?email=${email}&senha=${senha}`,
@@ -14,16 +28,13 @@ export async function login(email: string, senha: string) {
   return res.json();
 }
 
-//
+// =====================
 // LISTAR OS
-//
-export async function getOS() {
-  const token = localStorage.getItem("token");
+// =====================
 
+export async function getOS() {
   const res = await fetch(`${API}/os/abertas`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: getAuthHeader(),
   });
 
   if (!res.ok) throw new Error("Erro ao buscar OS");
@@ -31,56 +42,52 @@ export async function getOS() {
   return res.json();
 }
 
-//
+// =====================
 // INICIAR ATENDIMENTO
-//
+// =====================
+
 export async function iniciarAtendimento(osId: number) {
-  const token = localStorage.getItem("token");
+  const res = await fetch(`${API}/os/${osId}/iniciar`, {
+    method: "POST",
+    headers: getAuthHeader(),
+  });
 
-  const res = await fetch(
-    `${API}/os/${osId}/iniciar`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-
-  if (!res.ok) throw new Error("Falha ao iniciar");
+  if (!res.ok) throw new Error("Erro ao iniciar atendimento");
 
   return res.json();
 }
 
-
-//
+// =====================
 // FINALIZAR ATENDIMENTO
-//
-export async function finalizarAtendimento(atendimentoId: number) {
-  const token = localStorage.getItem("token");
+// =====================
 
-  const res = await fetch(
-    `${API}/atendimento/${atendimentoId}/finalizar`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+export async function finalizarAtendimento(
+  id: number,
+  dados: {
+    observacao: string;
+    latitude: number;
+    longitude: number;
+    foto: string;
+  }
+) {
+  const res = await fetch(`${API}/atendimento/${id}/finalizar`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify(dados),
+  });
 
-  if (!res.ok) throw new Error("Erro ao finalizar");
+  if (!res.ok) throw new Error("Erro ao finalizar atendimento");
 
   return res.json();
 }
+
+// =====================
+// HISTÓRICO
+// =====================
 
 export async function getHistorico() {
-  const token = localStorage.getItem("token");
-
   const res = await fetch(`${API}/atendimentos/historico`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: getAuthHeader(),
   });
 
   if (!res.ok) throw new Error("Erro ao buscar histórico");

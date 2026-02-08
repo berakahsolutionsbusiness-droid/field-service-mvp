@@ -3,6 +3,9 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import os
 
+# importa Base dos models
+from app.db.models import Base
+
 load_dotenv()
 
 DATABASE_URL = (
@@ -13,9 +16,9 @@ DATABASE_URL = (
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,   # evita conexões mortas
-    pool_size=10,         # conexões simultâneas
-    max_overflow=20       # pico de usuários
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20
 )
 
 SessionLocal = sessionmaker(
@@ -23,4 +26,8 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine
 )
+
+# 🔥 cria tabelas automaticamente
+Base.metadata.create_all(bind=engine)
+
 

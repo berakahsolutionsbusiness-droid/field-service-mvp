@@ -1,68 +1,63 @@
 import { useEffect, useState } from "react";
-import { getOS, iniciarAtendimento } from "../services/api";
 import { useNavigate } from "react-router-dom";
+import { getOS, iniciarAtendimento } from "../services/api";
 
 export default function TecnicoPage() {
-  const [ordens, setOrdens] = useState<any[]>([]);
-  const [status, setStatus] = useState("Carregando...");
+  const [lista, setLista] = useState<any[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
-    carregarOS();
+    carregar();
   }, []);
 
-  async function carregarOS() {
+  async function carregar() {
+    const data = await getOS();
+    setLista(data);
+  }
+
+  async function iniciar(osId: number) {
     try {
-      const data = await getOS();
-      setOrdens(data);
-      setStatus("");
-    } catch (err) {
-      console.error(err);
-      setStatus("Erro ao carregar OS");
+      const resp = await iniciarAtendimento(osId);
+
+      navigate(`/atendimento/${resp.atendimento_id}`);
+
+    } catch {
+      alert("⚠️ Você já está em atendimento. Finalize antes de iniciar outro.");
     }
   }
 
-async function iniciar(osId: number) {
-  try {
-    const data = await iniciarAtendimento(osId);
-
-    console.log("ATENDIMENTO:", data);
-
-    // 🔥 navegação acontece aqui
-    navigate(`/atendimento/${data.atendimento_id}`);
-
-  } catch (err) {
-    alert("Erro ao iniciar atendimento");
-    console.error(err);
-  }
-}
-
-
   return (
     <div style={{ padding: 40 }}>
+
       <h2>Área do Técnico</h2>
 
-      <button onClick={() => navigate("/historico")}>
-  Ver meu histórico
-</button>
+      {/* 🔵 BOTÃO HISTÓRICO */}
+      <button
+        onClick={() => navigate("/historico")}
+        style={{
+          marginBottom: 20,
+          padding: 10,
+          background: "#2d6cdf",
+          color: "white",
+          border: "none",
+          cursor: "pointer"
+        }}
+      >
+        📊 Histórico
+      </button>
 
+      {lista.length === 0 && <p>Nenhuma OS aberta.</p>}
 
-      {status && <p>{status}</p>}
-
-      {ordens.length === 0 && !status && (
-        <p>Nenhuma OS disponível</p>
-      )}
-
-      {ordens.map((os) => (
+      {lista.map((os) => (
         <div
           key={os.id}
           style={{
             border: "1px solid #ccc",
-            padding: 20,
+            padding: 15,
             marginBottom: 10,
           }}
         >
-          <h3>{os.cliente}</h3>
+          <strong>{os.cliente}</strong>
           <p>{os.endereco}</p>
 
           <button onClick={() => iniciar(os.id)}>

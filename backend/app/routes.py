@@ -42,6 +42,18 @@ def get_current_user(
 
     return user
 
+# ---------- Ultima Alteração ----------
+
+from pydantic import BaseModel
+
+class FinalizarData(BaseModel):
+    observacao: str
+    latitude: float
+    longitude: float
+    foto: str
+
+
+
 # ======================
 # Login
 # ======================
@@ -106,6 +118,7 @@ def iniciar_atendimento(
 @router.post("/atendimento/{id}/finalizar")
 def finalizar_atendimento(
     id: int,
+    data: FinalizarData,
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -115,11 +128,17 @@ def finalizar_atendimento(
         raise HTTPException(403, "Acesso negado")
 
     atendimento.hora_fim = datetime.utcnow()
+    atendimento.lat_fim = data.latitude
+    atendimento.lng_fim = data.longitude
+    atendimento.observacao = data.observacao
+    atendimento.foto = data.foto
+
     atendimento.os.status = StatusOS.CONCLUIDA
 
     db.commit()
 
     return {"message": "Atendimento finalizado"}
+
 
 
 @router.get("/atendimentos/historico")

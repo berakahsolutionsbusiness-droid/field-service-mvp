@@ -16,8 +16,7 @@ export default function LoginPage({ onLogin }: any) {
 
       setStatus("Login OK");
 
-      onLogin(); // 🔥 navega
-
+      onLogin();
     } catch {
       setStatus("Falha no login");
     }
@@ -44,9 +43,7 @@ export default function LoginPage({ onLogin }: any) {
 
       <br /><br />
 
-      <button onClick={handleLogin}>
-        Entrar
-      </button>
+      <button onClick={handleLogin}>Entrar</button>
 
       <p>{status}</p>
     </div>
