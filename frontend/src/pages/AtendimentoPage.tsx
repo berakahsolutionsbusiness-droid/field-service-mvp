@@ -9,19 +9,22 @@ export default function AtendimentoPage() {
   const [descricao, setDescricao] = useState("");
   const [status, setStatus] = useState("");
 
-  async function finalizar() {
-    try {
-      setStatus("Finalizando...");
+async function finalizar() {
+  if (!id) return;
 
-      await finalizarAtendimento(Number(id));
+  try {
+    setStatus("Finalizando...");
 
-      alert("Atendimento concluído!");
+    await finalizarAtendimento(Number(id));
 
-      navigate("/tecnico");
-    } catch {
-      setStatus("Erro ao finalizar");
-    }
+    alert("Atendimento concluído!");
+
+    navigate("/tecnico");
+  } catch {
+    setStatus("Erro ao finalizar");
   }
+}
+
 
   return (
     <div style={{ padding: 40 }}>

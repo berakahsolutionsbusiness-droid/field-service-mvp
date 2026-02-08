@@ -72,6 +72,8 @@ class Atendimento(Base):
     lng_fim = Column(Numeric)
 
     observacao = Column(Text)
+    foto = Column(Text)
+    
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     os = relationship("OS")

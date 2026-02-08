@@ -4,11 +4,11 @@ from auth import hash_password
 
 db = SessionLocal()
 
-senha_hash = hash_password("1234")
+senha_hash = hash_password("7777")
 
 novo = Tecnico(
-    nome="Romulo3",
-    email="romulo3@teste.com",
+    nome="Kery1",
+    email="kery1@teste.com",
     senha=senha_hash
 )
 

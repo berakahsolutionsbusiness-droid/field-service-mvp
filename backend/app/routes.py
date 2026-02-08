@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import datetime
 
 from app.database import SessionLocal
@@ -119,3 +120,35 @@ def finalizar_atendimento(
     db.commit()
 
     return {"message": "Atendimento finalizado"}
+
+
+@router.get("/atendimentos/historico")
+def historico_tecnico(
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    atendimentos = db.query(Atendimento).filter(
+        Atendimento.tecnico_id == user.id,
+        Atendimento.hora_fim.isnot(None)
+    ).all()
+
+    resultado = []
+
+    total_horas = 0
+
+    for a in atendimentos:
+        duracao = (a.hora_fim - a.hora_inicio).total_seconds() / 3600
+        total_horas += duracao
+
+        resultado.append({
+            "os": a.os.cliente,
+            "inicio": a.hora_inicio,
+            "fim": a.hora_fim,
+            "horas": round(duracao, 2)
+        })
+
+    return {
+        "historico": resultado,
+        "total_horas": round(total_horas, 2),
+        "previsao_pagamento": round(total_horas * 80, 2)  # valor/hora exemplo
+    }

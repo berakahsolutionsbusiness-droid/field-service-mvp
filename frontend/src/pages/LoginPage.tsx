@@ -14,11 +14,12 @@ export default function LoginPage({ onLogin }: any) {
 
       localStorage.setItem("token", data.token);
 
-      setStatus("✅ Login OK");
+      setStatus("Login OK");
 
-      onLogin();
+      onLogin(); // 🔥 navega
+
     } catch {
-      setStatus("❌ Falha no login");
+      setStatus("Falha no login");
     }
   }
 
@@ -35,8 +36,8 @@ export default function LoginPage({ onLogin }: any) {
       <br /><br />
 
       <input
-        type="password"
         placeholder="Senha"
+        type="password"
         value={senha}
         onChange={(e) => setSenha(e.target.value)}
       />

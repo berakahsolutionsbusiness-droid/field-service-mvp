@@ -1,65 +1,75 @@
 import { useEffect, useState } from "react";
+import { getOS, iniciarAtendimento } from "../services/api";
 import { useNavigate } from "react-router-dom";
-import { getOS, iniciarOS } from "../services/api";
 
 export default function TecnicoPage() {
-  const [osList, setOsList] = useState<any[]>([]);
-  const [status, setStatus] = useState("");
-
+  const [ordens, setOrdens] = useState<any[]>([]);
+  const [status, setStatus] = useState("Carregando...");
   const navigate = useNavigate();
-
-  // carregar OS
-  async function carregarOS() {
-    try {
-      const data = await getOS();
-      setOsList(data);
-    } catch {
-      setStatus("Erro ao carregar OS");
-    }
-  }
 
   useEffect(() => {
     carregarOS();
   }, []);
 
-  // aceitar OS
-  async function aceitar(osId: number) {
+  async function carregarOS() {
     try {
-      setStatus("Iniciando atendimento...");
-
-      const res = await iniciarOS(osId);
-
-      // 👉 vai para tela de atendimento
-      navigate(`/atendimento/${res.atendimento_id}`);
-    } catch {
-      setStatus("Erro ao iniciar atendimento");
+      const data = await getOS();
+      setOrdens(data);
+      setStatus("");
+    } catch (err) {
+      console.error(err);
+      setStatus("Erro ao carregar OS");
     }
   }
+
+async function iniciar(osId: number) {
+  try {
+    const data = await iniciarAtendimento(osId);
+
+    console.log("ATENDIMENTO:", data);
+
+    // 🔥 navegação acontece aqui
+    navigate(`/atendimento/${data.atendimento_id}`);
+
+  } catch (err) {
+    alert("Erro ao iniciar atendimento");
+    console.error(err);
+  }
+}
+
 
   return (
     <div style={{ padding: 40 }}>
       <h2>Área do Técnico</h2>
 
-      {osList.map((os) => (
+      <button onClick={() => navigate("/historico")}>
+  Ver meu histórico
+</button>
+
+
+      {status && <p>{status}</p>}
+
+      {ordens.length === 0 && !status && (
+        <p>Nenhuma OS disponível</p>
+      )}
+
+      {ordens.map((os) => (
         <div
           key={os.id}
           style={{
             border: "1px solid #ccc",
-            padding: 15,
+            padding: 20,
             marginBottom: 10,
           }}
         >
-          <b>Cliente:</b> {os.cliente} <br />
-          <b>Endereço:</b> {os.endereco} <br /><br />
+          <h3>{os.cliente}</h3>
+          <p>{os.endereco}</p>
 
-          {/* 👉 BOTÃO AQUI */}
-          <button onClick={() => aceitar(os.id)}>
-            Aceitar Atendimento
+          <button onClick={() => iniciar(os.id)}>
+            Iniciar Atendimento
           </button>
         </div>
       ))}
-
-      <p>{status}</p>
     </div>
   );
 }
