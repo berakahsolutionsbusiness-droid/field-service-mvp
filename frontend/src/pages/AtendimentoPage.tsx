@@ -13,20 +13,20 @@ export default function AtendimentoPage() {
     try {
       setStatus("Finalizando...");
 
-      const dados = {
+      // localização fake (pode trocar depois)
+      const payload = {
         observacao: descricao,
-        latitude: -23.55, // mock GPS
-        longitude: -46.63,
-        foto: "base64_fake_imagem",
+        latitude: -23.5,
+        longitude: -46.6,
+        foto: "",
       };
 
-      await finalizarAtendimento(Number(id), dados);
+      await finalizarAtendimento(Number(id), payload);
 
-      alert("Atendimento concluído!");
+      alert("✅ Atendimento concluído!");
 
       navigate("/tecnico");
-    } catch (err) {
-      console.error(err);
+    } catch {
       setStatus("Erro ao finalizar");
     }
   }
@@ -43,10 +43,11 @@ export default function AtendimentoPage() {
         style={{ width: "100%" }}
       />
 
-      <br /><br />
+      <br />
+      <br />
 
       <button onClick={finalizar}>
-        Finalizar Atendimento
+        ✅ Finalizar Atendimento
       </button>
 
       <p>{status}</p>

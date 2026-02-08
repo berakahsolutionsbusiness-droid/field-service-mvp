@@ -1,6 +1,11 @@
+# db/database.py
 import os
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+
+# Importa o Base do models
+from .models import Base
 
 load_dotenv()
 
@@ -12,3 +17,9 @@ DB_URL = (
 )
 
 engine = create_engine(DB_URL, echo=False)
+
+# Cria as tabelas no banco de dados
+Base.metadata.create_all(bind=engine)
+
+# Cria a fábrica de sessões
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

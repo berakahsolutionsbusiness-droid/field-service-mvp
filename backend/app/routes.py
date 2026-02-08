@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
+from pydantic import BaseModel
+
 
 from app.database import SessionLocal
 from app.db.models import Tecnico, OS, Atendimento, StatusOS
@@ -44,7 +46,7 @@ def get_current_user(
 
 # ---------- Ultima Alteração ----------
 
-from pydantic import BaseModel
+
 
 class FinalizarData(BaseModel):
     observacao: str
@@ -52,6 +54,11 @@ class FinalizarData(BaseModel):
     longitude: float
     foto: str
 
+
+
+class InicioData(BaseModel):
+    latitude: float
+    longitude: float
 
 
 # ======================
@@ -81,6 +88,7 @@ def listar_os(
 @router.post("/os/{os_id}/iniciar")
 def iniciar_atendimento(
     os_id: int,
+    data: InicioData,  # ← recebe GPS
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -89,6 +97,7 @@ def iniciar_atendimento(
     if not os or os.status != StatusOS.EM_ABERTO:
         raise HTTPException(400, "OS indisponível")
 
+    # verifica atendimento ativo
     ativo = db.query(Atendimento).filter(
         Atendimento.tecnico_id == user.id,
         Atendimento.hora_fim.is_(None)
@@ -97,13 +106,17 @@ def iniciar_atendimento(
     if ativo:
         raise HTTPException(400, "Você já está em atendimento")
 
+    # atualiza OS
     os.status = StatusOS.EM_ATENDIMENTO
     os.tecnico_id = user.id
 
+    # cria atendimento com GPS
     atendimento = Atendimento(
         os_id=os.id,
         tecnico_id=user.id,
-        hora_inicio=datetime.utcnow()
+        hora_inicio=datetime.utcnow(),
+        lat_inicio=data.latitude,
+        lng_inicio=data.longitude
     )
 
     db.add(atendimento)
@@ -114,6 +127,7 @@ def iniciar_atendimento(
         "message": "Atendimento iniciado",
         "atendimento_id": atendimento.id
     }
+
 
 @router.post("/atendimento/{id}/finalizar")
 def finalizar_atendimento(
@@ -171,3 +185,26 @@ def historico_tecnico(
         "total_horas": round(total_horas, 2),
         "previsao_pagamento": round(total_horas * 80, 2)  # valor/hora exemplo
     }
+
+
+
+@router.get("/atendimento/ativo")
+def atendimento_ativo(
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    atendimento = db.query(Atendimento).filter(
+        Atendimento.tecnico_id == user.id,
+        Atendimento.hora_fim.is_(None)
+    ).first()
+
+    if not atendimento:
+        return None
+
+    return {
+        "id": atendimento.id,
+        "os": atendimento.os.cliente,
+        "endereco": atendimento.os.endereco,
+        "inicio": atendimento.hora_inicio
+    }
+
