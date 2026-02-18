@@ -6,7 +6,6 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     DateTime,
-    Numeric,
     Enum
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -15,20 +14,34 @@ import enum
 
 Base = declarative_base()
 
-
-# =========================
-# ENUMS
-# =========================
+# =================================================
+# STATUS DA OS
+# =================================================
 
 class StatusOS(enum.Enum):
     EM_ABERTO = "EM_ABERTO"
     EM_ATENDIMENTO = "EM_ATENDIMENTO"
+    AGUARDANDO = "AGUARDANDO"
+    EM_CAMPO = "EM_CAMPO"
     CONCLUIDA = "CONCLUIDA"
 
 
-# =========================
+# =================================================
+# ETAPAS DO ATENDIMENTO
+# =================================================
+
+class Etapa(enum.Enum):
+    INSPECAO = "INSPECAO"
+    DIAGNOSTICO = "DIAGNOSTICO"
+    ORCAMENTO = "ORCAMENTO"
+    APROVACAO = "APROVACAO"
+    EXECUCAO = "EXECUCAO"
+    FINALIZACAO = "FINALIZACAO"
+
+
+# =================================================
 # TABELAS
-# =========================
+# =================================================
 
 class Tecnico(Base):
     __tablename__ = "tecnico"
@@ -49,7 +62,7 @@ class OS(Base):
 
     status = Column(Enum(StatusOS), default=StatusOS.EM_ABERTO)
 
-    tecnico_id = Column(Integer, ForeignKey("tecnico.id"), nullable=True)
+    tecnico_id = Column(Integer, ForeignKey("tecnico.id"))
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     tecnico = relationship("Tecnico")
@@ -60,32 +73,29 @@ class Atendimento(Base):
 
     id = Column(Integer, primary_key=True)
 
-    os_id = Column(Integer, ForeignKey("os.id"), nullable=False)
-    tecnico_id = Column(Integer, ForeignKey("tecnico.id"), nullable=False)
+    os_id = Column(Integer, ForeignKey("os.id"))
+    tecnico_id = Column(Integer, ForeignKey("tecnico.id"))
 
     hora_inicio = Column(DateTime)
     hora_fim = Column(DateTime)
 
-    lat_inicio = Column(Numeric)
-    lng_inicio = Column(Numeric)
-    lat_fim = Column(Numeric)
-    lng_fim = Column(Numeric)
-
-    observacao = Column(Text)
-    foto = Column(Text)
-    
-    criado_em = Column(DateTime, default=datetime.utcnow)
+    etapa = Column(Enum(Etapa), default=Etapa.INSPECAO)
 
     os = relationship("OS")
     tecnico = relationship("Tecnico")
 
 
-class Foto(Base):
-    __tablename__ = "foto"
+class EtapaHistorico(Base):
+    __tablename__ = "etapa_historico"
 
     id = Column(Integer, primary_key=True)
-    atendimento_id = Column(Integer, ForeignKey("atendimento.id"), nullable=False)
-    url = Column(String, nullable=False)
+
+    atendimento_id = Column(Integer, ForeignKey("atendimento.id"))
+
+    etapa = Column(Enum(Etapa))
+    descricao = Column(Text)
+    foto = Column(Text)
+
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     atendimento = relationship("Atendimento")

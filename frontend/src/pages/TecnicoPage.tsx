@@ -6,12 +6,14 @@ import {
   debugAtendimentoAtivo,
   obterLocalizacao,
   iniciarAtendimento,
+  Atendimento,
+  OS
 } from "../services/api";
 import { useNavigate } from "react-router-dom";
 
 export default function TecnicoPage() {
-  const [osList, setOS] = useState<any[]>([]);
-  const [ativo, setAtivo] = useState<any>(null);
+  const [osList, setOS] = useState<OS[]>([]);
+  const [ativo, setAtivo] = useState<Atendimento | null>(null);
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [obtendoGPS, setObtendoGPS] = useState(false);
@@ -27,12 +29,9 @@ export default function TecnicoPage() {
     try {
       console.log("=== CARREGANDO DADOS ===");
       
-      // Debug para verificar o que o backend retorna
-      const debugAtivo = await debugAtendimentoAtivo();
-      
-      // Busca atendimento ativo normal
+      // Busca atendimento ativo
       const atendimento = await getAtendimentoAtivo();
-      console.log("Atendimento ativo:", atendimento);
+      console.log("Atendimento ativo recebido:", atendimento);
       setAtivo(atendimento);
 
       // Busca OS disponíveis
@@ -49,21 +48,31 @@ export default function TecnicoPage() {
     }
   }
 
+  // Função para verificar se pode iniciar um novo atendimento
+  function podeIniciarAtendimento(): boolean {
+    // Se não tem atendimento ativo, pode iniciar
+    if (!ativo) return true;
+    
+    // Se tem atendimento ativo, verifica a etapa
+    // Só NÃO pode se estiver em EXECUÇÃO
+    return ativo.etapa !== "EXECUCAO";
+  }
+
   async function iniciar(id: number) {
     console.log("=== TENTANDO INICIAR OS:", id, "===");
     console.log("Ativo atual no estado:", ativo);
     
-    // Se já tem atendimento ativo, redireciona direto
-    if (ativo) {
-      console.log("Já tem atendimento ativo, redirecionando...");
-      navigate(`/atendimento/${ativo.id}`);
+    // Verifica se pode iniciar baseado na etapa
+    if (!podeIniciarAtendimento()) {
+      setErro("⚠ Você já tem um atendimento em EXECUÇÃO. Finalize-o antes de iniciar outro.");
       return;
     }
     
     setObtendoGPS(true);
+    setErro(""); // Limpa erros anteriores
     
     try {
-      // Opção 1: Tenta com GPS real
+      // Tenta obter localização
       let latitude = 0;
       let longitude = 0;
       
@@ -81,21 +90,23 @@ export default function TecnicoPage() {
       const resultado = await iniciarAtendimento(id, latitude, longitude);
       console.log("Atendimento iniciado com sucesso:", resultado);
       
-      // Recarrega para pegar o novo atendimento ativo
-      await carregar();
+      // IMPORTANTE: Aguarda um momento para o banco de dados atualizar
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Se agora tem atendimento ativo, redireciona
-      if (ativo) {
-        navigate(`/atendimento/${ativo.id}`);
+      // Busca o atendimento ativo novamente para confirmar
+      const novoAtivo = await getAtendimentoAtivo();
+      console.log("Novo atendimento ativo após iniciar:", novoAtivo);
+      
+      if (novoAtivo) {
+        setAtivo(novoAtivo);
+        // Redireciona para o atendimento
+        navigate(`/atendimento/${novoAtivo.id}`);
+      } else if (resultado && resultado.id) {
+        // Se não conseguiu buscar, mas tem resultado, usa o ID do resultado
+        navigate(`/atendimento/${resultado.id}`);
       } else {
-        // Tenta buscar novamente
-        const novoAtivo = await getAtendimentoAtivo();
-        if (novoAtivo) {
-          navigate(`/atendimento/${novoAtivo.id}`);
-        } else if (resultado && resultado.atendimento_id) {
-          // Usa o ID retornado pela API
-          navigate(`/atendimento/${resultado.atendimento_id}`);
-        }
+        // Último recurso: recarrega a página
+        await carregar();
       }
       
     } catch (error: any) {
@@ -108,12 +119,11 @@ export default function TecnicoPage() {
         
         // Força uma verificação EXTRA
         console.log("Fazendo verificação extra de atendimento ativo...");
-        const atendimentoExtra = await debugAtendimentoAtivo();
+        const atendimentoExtra = await getAtendimentoAtivo();
         
         if (atendimentoExtra) {
           setAtivo(atendimentoExtra);
-          const nomeCliente = atendimentoExtra.cliente || atendimentoExtra.os?.cliente || "Cliente";
-          setErro(`⚠ Você já está atendendo: ${nomeCliente}`);
+          setErro(`⚠ Você já está atendendo: ${atendimentoExtra.os?.cliente || "Cliente"}`);
           
           // Redireciona automaticamente após 2 segundos
           setTimeout(() => {
@@ -146,6 +156,29 @@ export default function TecnicoPage() {
     carregar();
   }
 
+  // Função para filtrar OS baseado nas regras de negócio
+  function getOSFiltradas() {
+    if (!ativo) {
+      // Se não tem atendimento ativo, mostra todas
+      return osList;
+    }
+
+    // Se tem atendimento ativo em etapa que permite múltiplos
+    if (['INSPECAO', 'DIAGNOSTICO', 'ORCAMENTO', 'APROVACAO'].includes(ativo.etapa)) {
+      // Mostra todas as OS que não estão em EXECUÇÃO por outros técnicos
+      return osList.filter(os => {
+        // Se a OS está EM_CAMPO e é de outro técnico, não mostra
+        if (os.status === 'EM_CAMPO' && os.tecnico_id !== ativo.os?.id) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    // Se está em EXECUÇÃO, não mostra nenhuma OS
+    return [];
+  }
+
   if (carregando) {
     return (
       <div style={{ 
@@ -171,6 +204,8 @@ export default function TecnicoPage() {
       </div>
     );
   }
+
+  const osFiltradas = getOSFiltradas();
 
   return (
     <div style={{ padding: 20, maxWidth: 1200, margin: "0 auto" }}>
@@ -375,7 +410,9 @@ export default function TecnicoPage() {
                 ATENDIMENTO EM ANDAMENTO
               </h2>
               <p style={{ margin: "5px 0 0 0", color: "#7f8c8d", fontSize: "14px" }}>
-                Finalize este atendimento antes de iniciar outro
+                {ativo.etapa === "EXECUCAO" 
+                  ? "Você está em EXECUÇÃO. Finalize antes de iniciar outro atendimento."
+                  : `Você pode iniciar outros atendimentos pois está em ${ativo.etapa}.`}
               </p>
             </div>
           </div>
@@ -396,7 +433,7 @@ export default function TecnicoPage() {
               }}>
                 <span style={{ color: "#2c3e50" }}>👤</span>
                 <span style={{ fontSize: "18px", color: "#2c3e50" }}>
-                  <strong>Cliente:</strong> {ativo.cliente || ativo.os?.cliente || "Não identificado"}
+                  <strong>Cliente:</strong> {ativo.os?.cliente || "Não identificado"}
                 </span>
               </div>
               
@@ -408,7 +445,7 @@ export default function TecnicoPage() {
               }}>
                 <span style={{ color: "#2c3e50" }}>📍</span>
                 <span style={{ fontSize: "16px", color: "#2c3e50" }}>
-                  <strong>Endereço:</strong> {ativo.endereco || ativo.os?.endereco || "Não informado"}
+                  <strong>Endereço:</strong> {ativo.os?.endereco || "Não informado"}
                 </span>
               </div>
             </div>
@@ -422,17 +459,9 @@ export default function TecnicoPage() {
               paddingTop: "10px",
               borderTop: "1px solid #ecf0f1"
             }}>
-              {ativo.os?.id && (
-                <span><strong>OS #:</strong> {ativo.os.id}</span>
-              )}
-              {ativo.id && (
-                <span><strong>Atendimento ID:</strong> {ativo.id}</span>
-              )}
-              {ativo.hora_inicio && (
-                <span>
-                  <strong>Início:</strong> {new Date(ativo.hora_inicio).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                </span>
-              )}
+              <span><strong>Etapa:</strong> {ativo.etapa}</span>
+              <span><strong>OS #:</strong> {ativo.os?.id}</span>
+              <span><strong>Atendimento ID:</strong> {ativo.id}</span>
             </div>
           </div>
 
@@ -462,33 +491,6 @@ export default function TecnicoPage() {
             >
               <span>▶</span>
               Continuar Atendimento
-            </button>
-            
-            <button
-              onClick={() => navigate(`/atendimento/${ativo.id}`)}
-              style={{
-                backgroundColor: "#27ae60",
-                color: "white",
-                padding: "14px 28px",
-                border: "none",
-                borderRadius: "8px",
-                cursor: "pointer",
-                flex: "1",
-                minWidth: "200px",
-                fontSize: "16px",
-                fontWeight: "bold",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "10px",
-                transition: "all 0.3s",
-                boxShadow: "0 4px 6px rgba(39, 174, 96, 0.2)"
-              }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#2ecc71"}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#27ae60"}
-            >
-              <span>✅</span>
-              Finalizar Atendimento
             </button>
           </div>
         </div>
@@ -550,12 +552,12 @@ export default function TecnicoPage() {
             fontWeight: "bold",
             fontSize: "14px"
           }}>
-            {osList.length} {osList.length === 1 ? "disponível" : "disponíveis"}
+            {osFiltradas.length} {osFiltradas.length === 1 ? "disponível" : "disponíveis"}
           </div>
         </div>
       </div>
 
-      {osList.length === 0 ? (
+      {osFiltradas.length === 0 ? (
         <div style={{
           padding: "40px",
           textAlign: "center",
@@ -565,10 +567,14 @@ export default function TecnicoPage() {
         }}>
           <div style={{ fontSize: "48px", marginBottom: "20px", color: "#95a5a6" }}>📭</div>
           <p style={{ fontSize: "18px", color: "#7f8c8d", marginBottom: "10px" }}>
-            Nenhuma OS disponível no momento
+            {ativo?.etapa === "EXECUCAO" 
+              ? "Você está em EXECUÇÃO. Finalize o atendimento atual para ver novas OS."
+              : "Nenhuma OS disponível no momento"}
           </p>
           <p style={{ fontSize: "14px", color: "#95a5a6" }}>
-            Volte mais tarde ou entre em contato com o supervisor.
+            {ativo?.etapa === "EXECUCAO" 
+              ? "Apenas um atendimento por vez é permitido na etapa de EXECUÇÃO."
+              : "Volte mais tarde ou entre em contato com o supervisor."}
           </p>
         </div>
       ) : (
@@ -577,7 +583,7 @@ export default function TecnicoPage() {
           gap: "20px",
           gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))"
         }}>
-          {osList.map((os) => (
+          {osFiltradas.map((os) => (
             <div
               key={os.id}
               style={{
@@ -587,7 +593,6 @@ export default function TecnicoPage() {
                 backgroundColor: "white",
                 boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
                 transition: "all 0.3s ease",
-                opacity: ativo ? 0.7 : 1,
                 position: "relative"
               }}
             >
@@ -621,16 +626,6 @@ export default function TecnicoPage() {
                     }}>
                       {os.cliente}
                     </strong>
-                    {os.telefone && (
-                      <span style={{ 
-                        fontSize: "14px", 
-                        color: "#7f8c8d",
-                        display: "block",
-                        marginTop: "3px"
-                      }}>
-                        📞 {os.telefone}
-                      </span>
-                    )}
                   </div>
                 </div>
                 
@@ -655,45 +650,50 @@ export default function TecnicoPage() {
                   </p>
                 </div>
                 
-                {os.observacao && (
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "flex-start", 
-                    gap: "10px",
-                    marginTop: "10px",
-                    paddingLeft: "52px"
+                <div style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "10px",
+                  marginTop: "10px",
+                  paddingLeft: "52px"
+                }}>
+                  <span style={{ 
+                    color: "#7f8c8d", 
+                    marginTop: "2px",
+                    flexShrink: 0
+                  }}>📊</span>
+                  <span style={{
+                    backgroundColor: 
+                      os.status === 'EM_ABERTO' ? '#e8f5e9' :
+                      os.status === 'EM_ATENDIMENTO' ? '#fff3e0' :
+                      os.status === 'AGUARDANDO' ? '#fff8e1' :
+                      os.status === 'EM_CAMPO' ? '#e3f2fd' : '#f5f5f5',
+                    color: 
+                      os.status === 'EM_ABERTO' ? '#2e7d32' :
+                      os.status === 'EM_ATENDIMENTO' ? '#e65100' :
+                      os.status === 'AGUARDANDO' ? '#f57f17' :
+                      os.status === 'EM_CAMPO' ? '#0d47a1' : '#424242',
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    fontWeight: "bold"
                   }}>
-                    <span style={{ 
-                      color: "#7f8c8d", 
-                      marginTop: "2px",
-                      flexShrink: 0
-                    }}>📝</span>
-                    <p style={{ 
-                      margin: 0, 
-                      color: "#7f8c8d",
-                      lineHeight: "1.4",
-                      fontSize: "14px",
-                      fontStyle: "italic"
-                    }}>
-                      {os.observacao.length > 100 
-                        ? os.observacao.substring(0, 100) + "..." 
-                        : os.observacao}
-                    </p>
-                  </div>
-                )}
+                    {os.status}
+                  </span>
+                </div>
               </div>
 
               <div>
                 <button 
                   onClick={() => iniciar(os.id)}
-                  disabled={!!ativo || obtendoGPS}
+                  disabled={!podeIniciarAtendimento() || obtendoGPS}
                   style={{
-                    backgroundColor: ativo || obtendoGPS ? "#bdc3c7" : "#3498db",
+                    backgroundColor: !podeIniciarAtendimento() || obtendoGPS ? "#bdc3c7" : "#3498db",
                     color: "white",
                     padding: "12px 20px",
                     border: "none",
                     borderRadius: "8px",
-                    cursor: ativo || obtendoGPS ? "not-allowed" : "pointer",
+                    cursor: !podeIniciarAtendimento() || obtendoGPS ? "not-allowed" : "pointer",
                     width: "100%",
                     fontSize: "16px",
                     fontWeight: "bold",
@@ -716,10 +716,10 @@ export default function TecnicoPage() {
                       }}></span>
                       Obtendo localização...
                     </>
-                  ) : ativo ? (
+                  ) : !podeIniciarAtendimento() ? (
                     <>
                       <span>⏸️</span>
-                      Atendimento em andamento
+                      Em EXECUÇÃO - Aguarde
                     </>
                   ) : (
                     <>
@@ -729,7 +729,7 @@ export default function TecnicoPage() {
                   )}
                 </button>
                 
-                {ativo && (
+                {!podeIniciarAtendimento() && (
                   <div style={{
                     marginTop: "15px",
                     padding: "10px",
@@ -749,7 +749,7 @@ export default function TecnicoPage() {
                       gap: "8px"
                     }}>
                       <span>ℹ️</span>
-                      Finalize o atendimento atual primeiro
+                      Você já tem um atendimento em EXECUÇÃO
                     </p>
                   </div>
                 )}
@@ -760,21 +760,25 @@ export default function TecnicoPage() {
       )}
       
       {/* Nota no final */}
-      {osList.length > 0 && (
-        <div style={{
-          marginTop: "30px",
-          padding: "15px",
-          backgroundColor: "#f8f9fa",
-          borderRadius: "8px",
-          border: "1px solid #e9ecef",
-          textAlign: "center"
-        }}>
-          <p style={{ margin: 0, color: "#6c757d", fontSize: "14px" }}>
-            <strong>Nota:</strong> Para iniciar um atendimento, é necessário permitir o acesso à localização.
-            {ativo && " Finalize o atendimento atual para iniciar um novo."}
-          </p>
-        </div>
-      )}
+      <div style={{
+        marginTop: "30px",
+        padding: "15px",
+        backgroundColor: "#f8f9fa",
+        borderRadius: "8px",
+        border: "1px solid #e9ecef",
+        textAlign: "center"
+      }}>
+        <p style={{ margin: 0, color: "#6c757d", fontSize: "14px" }}>
+          <strong>Regras de negócio:</strong> 
+          {ativo ? (
+            ativo.etapa === "EXECUCAO" 
+              ? " Você está em EXECUÇÃO - Apenas um atendimento por vez."
+              : ` Você está em ${ativo.etapa} - Pode iniciar outros atendimentos.`
+          ) : (
+            " Sem atendimentos ativos - Pode iniciar quantos precisar."
+          )}
+        </p>
+      </div>
       
       <style>{`
         @keyframes spin {

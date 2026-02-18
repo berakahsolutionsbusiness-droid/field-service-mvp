@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 # Importa o Base do models
-from .models import Base
+from models import Base
 
 load_dotenv()
 
