@@ -1,33 +1,26 @@
+# app/database.py
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
-import os
-
-# importa Base dos models
-from app.db.models import Base
 
 load_dotenv()
 
-DATABASE_URL = (
-    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@"
+from app.db.models import Base
+
+DB_URL = (
+    f"postgresql+psycopg2://"
+    f"{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@"
     f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/"
     f"{os.getenv('DB_NAME')}"
 )
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20
-)
+print(f"Conectando ao banco: {DB_URL.replace(os.getenv('DB_PASS', ''), '****')}")
 
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
+engine = create_engine(DB_URL, echo=False)
 
-# 🔥 cria tabelas automaticamente
+# Cria as tabelas no banco de dados
 Base.metadata.create_all(bind=engine)
 
-
+# Cria a fábrica de sessões
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

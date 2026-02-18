@@ -1,8 +1,14 @@
+# routes.py
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional, List
+import logging
+
+# Configurar logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from app.database import SessionLocal
 from app.db.models import (
@@ -75,7 +81,6 @@ def listar_os(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Busca todas as OS não concluídas
     lista = db.query(OS).filter(
         OS.status != StatusOS.CONCLUIDA
     ).all()
@@ -83,12 +88,6 @@ def listar_os(
     resultado = []
 
     for o in lista:
-        # Regras de visibilidade:
-        # - OS EM_ABERTO: todos veem
-        # - OS EM_ATENDIMENTO: só o técnico responsável vê
-        # - OS AGUARDANDO: todos veem (para pegar quando liberar)
-        # - OS EM_CAMPO: só o técnico responsável vê
-        
         if o.status == StatusOS.EM_ATENDIMENTO and o.tecnico_id != user.id:
             continue
             
@@ -107,24 +106,6 @@ def listar_os(
 
 
 # =================================================
-# VERIFICAR SE PODE INICIAR ATENDIMENTO
-# =================================================
-
-def pode_iniciar_atendimento(user_id: int, db: Session):
-    """
-    Verifica se o técnico pode iniciar um novo atendimento.
-    Só NÃO pode se tiver um atendimento em EXECUÇÃO ou FINALIZAÇÃO ativo.
-    """
-    atendimento_em_execucao = db.query(Atendimento).filter(
-        Atendimento.tecnico_id == user_id,
-        Atendimento.hora_fim.is_(None),
-        Atendimento.etapa.in_([Etapa.EXECUCAO, Etapa.FINALIZACAO])
-    ).first()
-    
-    return atendimento_em_execucao is None
-
-
-# =================================================
 # INICIAR ATENDIMENTO
 # =================================================
 
@@ -139,41 +120,30 @@ def iniciar_atendimento(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Verifica se pode iniciar (não ter EXECUÇÃO/FINALIZAÇÃO ativa)
-    if not pode_iniciar_atendimento(user.id, db):
-        raise HTTPException(400, "Você já tem um atendimento em EXECUÇÃO. Finalize-o antes de iniciar outro.")
-    
-    # Busca a OS
     os = db.get(OS, os_id)
     if not os:
         raise HTTPException(404, "OS não encontrada")
     
-    # Verifica se a OS já está sendo atendida por outro técnico
     if os.status in [StatusOS.EM_ATENDIMENTO, StatusOS.EM_CAMPO] and os.tecnico_id != user.id:
         raise HTTPException(400, "Esta OS já está sendo atendida por outro técnico")
     
-    # Verifica se já existe um atendimento para esta OS (etapas anteriores)
     atendimento_existente = db.query(Atendimento).filter(
         Atendimento.os_id == os_id,
         Atendimento.hora_fim.is_(None)
     ).first()
     
     if atendimento_existente:
-        # Se existe e é de outro técnico, não permite
         if atendimento_existente.tecnico_id != user.id:
             raise HTTPException(400, "Esta OS já possui um atendimento em andamento")
-        # Se é do mesmo técnico, retorna o atendimento existente
         return {"id": atendimento_existente.id, "mensagem": "Atendimento já existe"}
     
-    # Cria novo atendimento
     atendimento = Atendimento(
         os_id=os.id,
         tecnico_id=user.id,
         hora_inicio=datetime.utcnow(),
-        etapa=Etapa.INSPECAO  # Começa sempre em INSPECAO
+        etapa=Etapa.INSPECAO
     )
     
-    # Atualiza status da OS
     os.status = StatusOS.EM_ATENDIMENTO
     os.tecnico_id = user.id
     
@@ -181,7 +151,6 @@ def iniciar_atendimento(
     db.commit()
     db.refresh(atendimento)
     
-    # Cria primeiro histórico
     historico = EtapaHistorico(
         atendimento_id=atendimento.id,
         etapa=Etapa.INSPECAO,
@@ -211,34 +180,27 @@ def avancar_etapa(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Busca o atendimento
     atendimento = db.get(Atendimento, id)
     if not atendimento:
         raise HTTPException(404, "Atendimento não encontrado")
     
-    # Verifica se o atendimento é do usuário
     if atendimento.tecnico_id != user.id:
         raise HTTPException(403, "Você não tem permissão para este atendimento")
     
-    # Converte a etapa string para Enum
     try:
         nova_etapa = Etapa[data.etapa]
     except KeyError:
         raise HTTPException(400, f"Etapa inválida: {data.etapa}")
     
-    # Valida sequência de etapas
     etapas_ordem = list(Etapa)
     etapa_atual_index = etapas_ordem.index(atendimento.etapa)
     nova_etapa_index = etapas_ordem.index(nova_etapa)
     
-    # Permite avançar ou voltar? Vamos permitir apenas avançar
     if nova_etapa_index <= etapa_atual_index and nova_etapa != atendimento.etapa:
-        raise HTTPException(400, f"Não é possível voltar para {nova_etapa.value}. Etapa atual: {atendimento.etapa.value}")
+        raise HTTPException(400, f"Não é possível voltar para {nova_etapa.value}")
     
-    # Atualiza etapa do atendimento
     atendimento.etapa = nova_etapa
     
-    # Cria histórico
     hist = EtapaHistorico(
         atendimento_id=id,
         etapa=nova_etapa,
@@ -247,7 +209,6 @@ def avancar_etapa(
     )
     db.add(hist)
     
-    # Atualiza status da OS baseado na etapa
     if nova_etapa in [Etapa.ORCAMENTO, Etapa.APROVACAO]:
         atendimento.os.status = StatusOS.AGUARDANDO
     elif nova_etapa == Etapa.EXECUCAO:
@@ -255,7 +216,7 @@ def avancar_etapa(
     elif nova_etapa == Etapa.FINALIZACAO:
         atendimento.hora_fim = datetime.utcnow()
         atendimento.os.status = StatusOS.CONCLUIDA
-    else:  # INSPECAO, DIAGNOSTICO
+    else:
         atendimento.os.status = StatusOS.EM_ATENDIMENTO
     
     db.commit()
@@ -270,23 +231,17 @@ def avancar_etapa(
 # ATENDIMENTO ATIVO
 # =================================================
 
-# =================================================
-# ATENDIMENTO ATIVO
-# =================================================
-
 @router.get("/atendimento/ativo")
 def atendimento_ativo(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Busca atendimento ativo (qualquer etapa, desde que não finalizado)
     atendimento = db.query(Atendimento).filter(
         Atendimento.tecnico_id == user.id,
         Atendimento.hora_fim.is_(None)
     ).first()
 
     if not atendimento:
-        # Retorna null em vez de 404
         return None
 
     return {
@@ -302,7 +257,65 @@ def atendimento_ativo(
 
 
 # =================================================
-# HISTÓRICO DE ETAPAS (CORRIGIDO - ENDPOINT CORRETO)
+# HISTÓRICO COMPLETO
+# =================================================
+
+@router.get("/atendimentos/historico")
+def listar_historico_completo(
+    user: Tecnico = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    logger.info(f"📊 Buscando histórico completo para técnico {user.id}")
+    
+    try:
+        atendimentos = db.query(Atendimento).filter(
+            Atendimento.tecnico_id == user.id
+        ).order_by(Atendimento.hora_inicio.desc()).all()
+        
+        logger.info(f"✅ Encontrados {len(atendimentos)} atendimentos")
+        
+        resultado = []
+        
+        for atendimento in atendimentos:
+            try:
+                etapas = db.query(EtapaHistorico).filter(
+                    EtapaHistorico.atendimento_id == atendimento.id
+                ).order_by(EtapaHistorico.criado_em).all()
+                
+                resultado.append({
+                    "id": atendimento.id,
+                    "os_id": atendimento.os_id,
+                    "cliente": atendimento.os.cliente if atendimento.os else "Cliente não encontrado",
+                    "endereco": atendimento.os.endereco if atendimento.os else "Endereço não encontrado",
+                    "etapa_atual": atendimento.etapa.value if atendimento.etapa else None,
+                    "hora_inicio": atendimento.hora_inicio.isoformat() if atendimento.hora_inicio else None,
+                    "hora_fim": atendimento.hora_fim.isoformat() if atendimento.hora_fim else None,
+                    "status": "concluido" if atendimento.hora_fim else "em_andamento",
+                    "etapas": [
+                        {
+                            "id": e.id,
+                            "etapa": e.etapa.value if e.etapa else None,
+                            "descricao": e.descricao,
+                            "foto": e.foto,
+                            "criado_em": e.criado_em.isoformat() if e.criado_em else None
+                        }
+                        for e in etapas
+                    ]
+                })
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar atendimento {atendimento.id}: {e}")
+                continue
+        
+        logger.info(f"✅ Histórico processado com sucesso: {len(resultado)} itens")
+        return resultado
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao buscar histórico: {e}")
+        raise HTTPException(500, f"Erro ao buscar histórico: {str(e)}")
+
+
+# =================================================
+# ETAPAS DE UM ATENDIMENTO
 # =================================================
 
 @router.get("/atendimento/{id}/etapas")
@@ -311,18 +324,10 @@ def get_etapas_historico(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Retorna o histórico de etapas de um atendimento"""
-    
-    # Verifica se o atendimento existe
     atendimento = db.get(Atendimento, id)
     if not atendimento:
         raise HTTPException(404, "Atendimento não encontrado")
     
-    # Verifica permissão (opcional - pode permitir ver qualquer um?)
-    # if atendimento.tecnico_id != user.id:
-    #     raise HTTPException(403, "Sem permissão para ver este histórico")
-    
-    # Busca histórico
     historico = db.query(EtapaHistorico).filter(
         EtapaHistorico.atendimento_id == id
     ).order_by(EtapaHistorico.criado_em).all()
@@ -330,7 +335,7 @@ def get_etapas_historico(
     return [
         {
             "id": h.id,
-            "etapa": h.etapa.value,
+            "etapa": h.etapa.value if h.etapa else None,
             "descricao": h.descricao,
             "foto": h.foto,
             "criado_em": h.criado_em.isoformat() if h.criado_em else None
@@ -340,7 +345,7 @@ def get_etapas_historico(
 
 
 # =================================================
-# HISTÓRICO COMPLETO (mantido para compatibilidade)
+# HISTÓRICO (COMPATIBILIDADE)
 # =================================================
 
 @router.get("/atendimento/{id}/historico")
@@ -349,12 +354,11 @@ def historico_completo(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Alias para /etapas (mantido por compatibilidade)"""
     return get_etapas_historico(id, user, db)
 
 
 # =================================================
-# LISTAR ATENDIMENTOS DO TÉCNICO
+# MEUS ATENDIMENTOS
 # =================================================
 
 @router.get("/tecnicos/meus-atendimentos")
@@ -362,8 +366,6 @@ def meus_atendimentos(
     user: Tecnico = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Lista todos os atendimentos do técnico"""
-    
     atendimentos = db.query(Atendimento).filter(
         Atendimento.tecnico_id == user.id
     ).order_by(Atendimento.hora_inicio.desc()).all()
@@ -372,9 +374,9 @@ def meus_atendimentos(
         {
             "id": a.id,
             "os_id": a.os_id,
-            "cliente": a.os.cliente,
-            "etapa": a.etapa.value,
-            "status_os": a.os.status.value,
+            "cliente": a.os.cliente if a.os else None,
+            "etapa": a.etapa.value if a.etapa else None,
+            "status_os": a.os.status.value if a.os and a.os.status else None,
             "hora_inicio": a.hora_inicio.isoformat() if a.hora_inicio else None,
             "hora_fim": a.hora_fim.isoformat() if a.hora_fim else None,
             "ativo": a.hora_fim is None

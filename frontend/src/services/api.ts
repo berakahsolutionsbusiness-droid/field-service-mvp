@@ -2,7 +2,7 @@
 const API = "http://127.0.0.1:8000/api";
 
 // =====================
-// TIPOS (opcional, mas recomendado)
+// INTERFACES
 // =====================
 
 export interface OS {
@@ -11,6 +11,8 @@ export interface OS {
   endereco: string;
   status: string;
   tecnico_id?: number;
+  observacao?: string;
+  telefone?: string;
 }
 
 export interface Atendimento {
@@ -30,6 +32,18 @@ export interface EtapaHistorico {
   descricao: string;
   foto: string;
   criado_em: string;
+}
+
+export interface AtendimentoHistorico {
+  id: number;
+  os_id: number;
+  cliente: string;
+  endereco: string;
+  etapa_atual: string;
+  hora_inicio: string;
+  hora_fim: string | null;
+  status: string;
+  etapas: EtapaHistorico[];
 }
 
 export interface LoginResponse {
@@ -68,6 +82,15 @@ export async function login(email: string, senha: string): Promise<LoginResponse
 }
 
 // =====================
+// LOGOUT
+// =====================
+
+export function logout() {
+  localStorage.removeItem("token");
+  window.location.href = "/login";
+}
+
+// =====================
 // LISTAR OS
 // =====================
 
@@ -78,8 +101,7 @@ export async function getOS(): Promise<OS[]> {
 
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
+      logout();
       throw new Error("Sessão expirada");
     }
     throw new Error("Erro ao buscar OS");
@@ -135,6 +157,21 @@ export async function iniciarAtendimento(
 }
 
 // =====================
+// INICIAR ATENDIMENTO COM GPS
+// =====================
+
+export async function iniciarAtendimentoComGPS(osId: number) {
+  try {
+    const posicao = await obterLocalizacao();
+    console.log("Localização obtida:", posicao);
+    return await iniciarAtendimento(osId, posicao.latitude, posicao.longitude);
+  } catch (gpsError) {
+    console.warn("Não foi possível obter GPS, usando valores padrão:", gpsError);
+    return await iniciarAtendimento(osId, 0, 0);
+  }
+}
+
+// =====================
 // AVANÇAR ETAPA
 // =====================
 
@@ -144,20 +181,19 @@ export async function avancarEtapa(
   descricao: string = "",
   foto: string = ""
 ) {
+  console.log(`📤 Enviando requisição para /atendimento/${id}/etapa`, { etapa, descricao });
+  
   const res = await fetch(`${API}/atendimento/${id}/etapa`, {
     method: "POST",
     headers: getAuthHeader(),
-    body: JSON.stringify({ 
-      etapa, 
-      descricao, 
-      foto 
-    }),
+    body: JSON.stringify({ etapa, descricao, foto }),
   });
 
   if (!res.ok) {
     let errorMessage = "Erro ao avançar etapa";
     try {
       const errorData = await res.json();
+      console.error("Erro detalhado:", errorData);
       errorMessage = errorData.detail || errorMessage;
     } catch (e) {}
     throw new Error(errorMessage);
@@ -170,41 +206,23 @@ export async function avancarEtapa(
 // ATENDIMENTO ATIVO
 // =====================
 
-// api.ts - versão corrigida
-
-// =====================
-// ATENDIMENTO ATIVO - CORRIGIDO
-// =====================
-
 export async function getAtendimentoAtivo(): Promise<Atendimento | null> {
-  const token = localStorage.getItem("token");
-
   try {
     const res = await fetch(`${API}/atendimento/ativo`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: getAuthHeader(),
     });
 
-    // Se retornar 404, não há atendimento ativo (tratamento mantido por segurança)
     if (res.status === 404) {
-      console.log("Nenhum atendimento ativo (404)");
       return null;
     }
 
     if (!res.ok) {
-      console.log("Erro na resposta:", res.status);
-      return null; // Retorna null em qualquer erro
+      return null;
     }
 
     const data = await res.json();
-    
-    // Se retornou null ou vazio, não há atendimento ativo
-    if (!data) {
-      return null;
-    }
-    
     return data;
+    
   } catch (error) {
     console.error("Erro getAtendimentoAtivo:", error);
     return null;
@@ -212,7 +230,36 @@ export async function getAtendimentoAtivo(): Promise<Atendimento | null> {
 }
 
 // =====================
-// HISTÓRICO DE ETAPAS (CORRIGIDO)
+// HISTÓRICO COMPLETO (CORRIGIDO)
+// =====================
+
+export async function getHistorico(): Promise<AtendimentoHistorico[]> {
+  try {
+    const res = await fetch(`${API}/atendimentos/historico`, {
+      headers: getAuthHeader(),
+    });
+
+    if (res.status === 404) {
+      return [];
+    }
+
+    if (!res.ok) {
+      throw new Error(`Erro ao buscar histórico: ${res.status}`);
+    }
+
+    const data = await res.json();
+    console.log("📦 Histórico recebido:", data);
+    
+    return Array.isArray(data) ? data : [];
+    
+  } catch (error) {
+    console.error("❌ Erro em getHistorico:", error);
+    return [];
+  }
+}
+
+// =====================
+// ETAPAS DE UM ATENDIMENTO
 // =====================
 
 export async function getEtapas(id: number): Promise<EtapaHistorico[]> {
@@ -222,44 +269,45 @@ export async function getEtapas(id: number): Promise<EtapaHistorico[]> {
     });
 
     if (res.status === 404) {
-      return []; // Retorna array vazio se não encontrar
+      return [];
     }
 
     if (!res.ok) {
       throw new Error("Erro ao buscar histórico de etapas");
     }
 
-    return res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+    
   } catch (error) {
     console.error("Erro em getEtapas:", error);
-    return []; // Retorna array vazio em caso de erro
+    return [];
   }
 }
 
 // =====================
-// HISTÓRICO COMPLETO (mantido para compatibilidade)
+// MEUS ATENDIMENTOS
 // =====================
 
-export async function getHistorico(id?: number): Promise<EtapaHistorico[]> {
-  if (id) {
-    return getEtapas(id);
-  }
-  
-  // Se não passar ID, busca histórico geral (se existir esse endpoint)
+export async function getMeusAtendimentos(): Promise<any[]> {
   try {
-    const res = await fetch(`${API}/atendimentos/historico`, {
+    const res = await fetch(`${API}/tecnicos/meus-atendimentos`, {
       headers: getAuthHeader(),
     });
 
-    if (!res.ok) {
-      if (res.status === 404) {
-        return [];
-      }
-      throw new Error("Erro ao buscar histórico");
+    if (res.status === 404) {
+      return [];
     }
-    return res.json();
+
+    if (!res.ok) {
+      throw new Error("Erro ao buscar meus atendimentos");
+    }
+
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+    
   } catch (error) {
-    console.error("Erro em getHistorico:", error);
+    console.error("Erro em getMeusAtendimentos:", error);
     return [];
   }
 }
@@ -296,7 +344,7 @@ export async function finalizarAtendimento(
 }
 
 // =====================
-// FUNÇÃO PARA OBTER LOCALIZAÇÃO
+// OBTER LOCALIZAÇÃO
 // =====================
 
 export function obterLocalizacao(): Promise<{latitude: number, longitude: number}> {
@@ -340,50 +388,6 @@ export function obterLocalizacao(): Promise<{latitude: number, longitude: number
 }
 
 // =====================
-// FUNÇÃO PARA INICIAR COM GPS
-// =====================
-
-export async function iniciarAtendimentoComGPS(osId: number) {
-  try {
-    // Tenta obter localização real
-    const posicao = await obterLocalizacao();
-    console.log("Localização obtida:", posicao);
-    
-    // Inicia atendimento com GPS real
-    return await iniciarAtendimento(osId, posicao.latitude, posicao.longitude);
-  } catch (gpsError) {
-    console.warn("Não foi possível obter GPS, usando valores padrão:", gpsError);
-    
-    // Se falhar o GPS, usa valores padrão (0,0)
-    return await iniciarAtendimento(osId, 0, 0);
-  }
-}
-
-// =====================
-// MEUS ATENDIMENTOS
-// =====================
-
-export async function getMeusAtendimentos() {
-  try {
-    const res = await fetch(`${API}/tecnicos/meus-atendimentos`, {
-      headers: getAuthHeader(),
-    });
-
-    if (!res.ok) {
-      if (res.status === 404) {
-        return [];
-      }
-      throw new Error("Erro ao buscar meus atendimentos");
-    }
-
-    return res.json();
-  } catch (error) {
-    console.error("Erro em getMeusAtendimentos:", error);
-    return [];
-  }
-}
-
-// =====================
 // VERIFICAR SE PODE INICIAR ATENDIMENTO
 // =====================
 
@@ -391,17 +395,14 @@ export async function verificarPodeIniciarAtendimento(): Promise<boolean> {
   try {
     const atendimentoAtivo = await getAtendimentoAtivo();
     
-    // Se não tem atendimento ativo, pode iniciar
     if (!atendimentoAtivo) {
       return true;
     }
     
-    // Se tem atendimento ativo, verifica a etapa
-    // Só NÃO pode se estiver em EXECUÇÃO
     return atendimentoAtivo.etapa !== "EXECUCAO";
+    
   } catch (error) {
     console.error("Erro ao verificar permissão:", error);
-    // Em caso de erro, permite tentar (o backend vai barrar se necessário)
     return true;
   }
 }
@@ -412,67 +413,38 @@ export async function verificarPodeIniciarAtendimento(): Promise<boolean> {
 
 export async function debugAtendimentoAtivo() {
   try {
-    const token = localStorage.getItem("token");
-    console.log("Token atual:", token?.substring(0, 20) + "...");
-    
     const res = await fetch(`${API}/atendimento/ativo`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: getAuthHeader(),
     });
     
     console.log("Status do /ativo:", res.status);
-    console.log("Headers:", Object.fromEntries(res.headers.entries()));
     
     if (res.status === 404) {
-      console.log("Nenhum atendimento ativo encontrado (404)");
+      console.log("Nenhum atendimento ativo encontrado");
       return null;
     }
     
     if (!res.ok) {
       const text = await res.text();
       console.log("Resposta de erro:", text);
-      throw new Error(`HTTP ${res.status}: ${text}`);
+      return null;
     }
     
     const data = await res.json();
     console.log("Atendimento ativo encontrado:", data);
     return data;
+    
   } catch (error) {
     console.error("Erro no debugAtendimentoAtivo:", error);
     return null;
   }
 }
 
-export async function verificarAtendimentoAtivo() {
-  try {
-    const token = localStorage.getItem("token");
-    
-    const res = await fetch(`${API}/atendimento/ativo`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (res.status === 404) {
-      return null; // Nenhum atendimento ativo
-    }
-
-    if (!res.ok) throw new Error("Erro ao verificar atendimento ativo");
-
-    return res.json();
-  } catch (error) {
-    console.error("Erro ao verificar atendimento ativo:", error);
-    return null;
-  }
-}
-
 // =====================
-// FUNÇÃO PARA SALVAR ETAPA (MANTIDA PARA COMPATIBILIDADE)
+// SALVAR ETAPA (COMPATIBILIDADE)
 // =====================
 
 export async function salvarEtapa(id: number, dados: any) {
-  // Adapta os dados para o formato esperado pelo backend
   const payload = {
     etapa: dados.etapa || dados.novaEtapa,
     descricao: dados.descricao || "",
@@ -480,40 +452,4 @@ export async function salvarEtapa(id: number, dados: any) {
   };
   
   return avancarEtapa(id, payload.etapa, payload.descricao, payload.foto);
-}
-
-// =====================
-// LOGOUT
-// =====================
-
-export function logout() {
-  localStorage.removeItem("token");
-  window.location.href = "/login";
-}
-
-
-// api.ts - função de debug para verificar atendimentos
-
-export async function debugMeusAtendimentos() {
-  try {
-    const token = localStorage.getItem("token");
-    
-    const res = await fetch(`${API}/tecnicos/meus-atendimentos`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!res.ok) {
-      console.log("Erro ao buscar meus atendimentos:", res.status);
-      return [];
-    }
-
-    const data = await res.json();
-    console.log("Meus atendimentos:", data);
-    return data;
-  } catch (error) {
-    console.error("Erro no debugMeusAtendimentos:", error);
-    return [];
-  }
 }
